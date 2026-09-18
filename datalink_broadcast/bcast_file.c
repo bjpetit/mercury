@@ -438,7 +438,7 @@ struct bcast_file_rx
     uint64_t  symbols;
     size_t    expect_bytes;
 
-    char      last_path[600];
+    char      last_path[770];
     char      last_name[BCAST_BUNDLE_NAME_MAX + 1];
     char      err[192];
 };
@@ -669,7 +669,7 @@ bcast_rx_result_t bcast_file_rx_frame(bcast_file_rx_t *rx,
             payload_len = got;
         }
 
-        char path[600];
+        char path[770];
         snprintf(path, sizeof(path), "%s/%s", rx->dir, name);
         FILE *of = fopen(path, "wb");
         if (!of)

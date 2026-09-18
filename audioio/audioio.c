@@ -110,7 +110,7 @@ static volatile bool audio_shutdown_ = false;  // local stop flag for audio thre
 static pthread_mutex_t s_health_lock = PTHREAD_MUTEX_INITIALIZER;
 static audio_health_t  s_cap_health  = AUDIO_HEALTH_STOPPED;
 static audio_health_t  s_play_health = AUDIO_HEALTH_STOPPED;
-static char            s_health_reason[192];
+static char            s_health_reason[256];
 
 static void audio_health_set(bool capture, audio_health_t st, const char *reason)
 {

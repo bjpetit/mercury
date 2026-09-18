@@ -453,8 +453,11 @@ static void handle_cmd(const arq_cmd_msg_t *msg)
         pthread_mutex_lock(&g_conn_lock);
         if (arq_conn.secondary_call_count < CALLSIGN_MAX_SECONDARY)
         {
-            snprintf(arq_conn.secondary_calls[arq_conn.secondary_call_count],
-                     CALLSIGN_MAX_SIZE, "%s", msg->arg0);
+            char *secondary = arq_conn.secondary_calls[arq_conn.secondary_call_count];
+            size_t secondary_size = sizeof(arq_conn.secondary_calls[0]);
+            snprintf(secondary, secondary_size, "%.*s",
+                     (int)(secondary_size - 1), msg->arg0);
+            secondary[secondary_size - 1] = '\0';
             arq_conn.secondary_call_count++;
             new_count = arq_conn.secondary_call_count;
         }
@@ -794,7 +797,9 @@ bool arq_handle_incoming_connect_frame(uint8_t *data, size_t frame_size)
     /* src = transmitting side's callsign */
     snprintf(ev.remote_call, CALLSIGN_MAX_SIZE, "%s", src);
     /* local = the one of our callsigns the caller dialed (primary or secondary) */
-    snprintf(ev.local_call, CALLSIGN_MAX_SIZE, "%s", dialed_call);
+    snprintf(ev.local_call, sizeof(ev.local_call), "%.*s",
+             (int)(sizeof(ev.local_call) - 1), dialed_call);
+    ev.local_call[sizeof(ev.local_call) - 1] = '\0';
     pthread_mutex_lock(&g_conn_lock);
     int local_bw = normalize_bandwidth_hz(arq_conn.bw);
     if (is_accept)

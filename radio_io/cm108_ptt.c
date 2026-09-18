@@ -313,7 +313,7 @@ int mercury_cm108_list(char *buf, size_t buf_size)
         if (strncmp(e->d_name, "hidraw", 6) != 0)
             continue;
         unsigned vid = 0, pid = 0;
-        char desc[128];
+        char desc[256];
         if (!hidraw_ids(e->d_name, &vid, &pid, desc, sizeof(desc)))
             continue;
         const char *chip = variant_name(vid, pid);

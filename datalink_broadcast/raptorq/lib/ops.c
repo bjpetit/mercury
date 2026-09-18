@@ -108,8 +108,10 @@ void ops_mix(nanorq_core *rq, uint8_t *D, uint32_t stride, u32 esi, u8 *ptr) {
 
 size_t ops_estimate_schedule_bytes(uint32_t K) {
   /* allocate 40 * k + 1000 to conservatively bound schedule length. */
+#if SIZE_MAX <= UINT32_MAX
   if ((size_t)K > (SIZE_MAX - 1000) / 40)
     return 0;
+#endif
   size_t estimated_ops = 40 * (size_t)K + 1000;
   if (estimated_ops > SIZE_MAX / sizeof(sched_op))
     return 0;

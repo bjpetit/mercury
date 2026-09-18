@@ -74,15 +74,27 @@ void ui_devices_disambiguate(ui_device_t *devs, int count)
 
         if (idl + deco + 1 <= cap)
         {
-            snprintf(label, cap, "%.*s [%s]",
-                     (int)(cap - 1 - deco - idl), devs[i].name, devs[i].id);
+            size_t name_len = strlen(devs[i].name);
+            if (name_len > cap - 1 - deco - idl)
+                name_len = cap - 1 - deco - idl;
+
+            memcpy(label, devs[i].name, name_len);
+            label[name_len] = ' ';
+            label[name_len + 1] = '[';
+            memcpy(label + name_len + 2, devs[i].id, idl);
+            label[name_len + 2 + idl] = ']';
+            label[name_len + deco + idl] = '\0';
         }
         else
         {
             /* Pathological: the id alone overflows the field.  Drop the name
              * entirely and keep the id's TAIL — a truncated head is what ids
              * share, a tail is where they differ. */
-            snprintf(label, cap, "[%s]", devs[i].id + (idl - (cap - deco)));
+            size_t tail_len = cap - deco;
+            label[0] = '[';
+            memcpy(label + 1, devs[i].id + (idl - tail_len), tail_len);
+            label[tail_len + 1] = ']';
+            label[tail_len + 2] = '\0';
         }
         snprintf(devs[i].name, sizeof(devs[i].name), "%s", label);
     }
