@@ -207,7 +207,7 @@ else
 BINARY = mercury
 endif
 
-LDFLAGS=$(FFAUDIO_LINKFLAGS) -lm $(HAMLIB_LDFLAGS) $(HIDAPI_LDFLAGS) $(ATOMIC_LDFLAGS)
+LDFLAGS=$(FFAUDIO_LINKFLAGS) -lm $(HAMLIB_LDFLAGS) $(HIDAPI_LDFLAGS) $(ATOMIC_LDFLAGS) $(WS_TLS_LDFLAGS)
 
 MERCURY_LINK_INPUTS = \
 	main.o common/cfg_utils.o common/iniparser/iniparser.o common/iniparser/dictionary.o \
@@ -217,8 +217,10 @@ MERCURY_LINK_INPUTS = \
 	audioio/audioio.a common/os_interop.o common/ring_buffer_posix.o common/shm_posix.o common/crc6.o common/hermes_log.o common/virtual_clock.o \
 	common/chan.o common/queue.o common/mercury_engine.o common/mercury_cli.o common/mercury_modes.o common/message_store.o data_interfaces/tcp_interfaces.o data_interfaces/net.o \
 	gui_interface/ui_communication.o gui_interface/ui_status.o gui_interface/ui_devices.o gui_interface/ui_history.o \
-	gui_interface/websocket/mongoose.o gui_interface/websocket/mercury_websocket.o \
-	gui_interface/websocket/web_packed.o \
+	gui_interface/websocket/mercury_websocket.o gui_interface/websocket/ws_server.o \
+	gui_interface/websocket/ws_crypto.o gui_interface/websocket/ws_frame.o \
+	gui_interface/websocket/ws_json.o \
+	gui_interface/websocket/ws_tls.o gui_interface/websocket/web_packed.o \
 	radio_io/radio_io.o radio_io/serial_ptt.o radio_io/cm108_ptt.o $(HIDAPI_OBJS)
 
 ifeq ($(HAVE_HERMES_SHM),1)
@@ -249,9 +251,11 @@ $(BINARY): $(MERCURY_LINK_INPUTS)
 	$(CC) -o $(BINARY)  \
 		$(MERCURY_LINK_INPUTS) $(LDFLAGS) $(SAN_LDFLAGS)
 
-# Stamp file: written only when GIT_HASH changes so main.o is rebuilt
-# exactly when needed (FORCE makes the recipe always run; the recipe
-# only touches the file when the content actually differs).
+# Stamp file: written only when GIT_HASH changes so the objects that embed it
+# (main.o and common/mercury_cli.o) are rebuilt exactly when needed (FORCE makes
+# the recipe always run; the recipe only touches the file when the content
+# actually differs).  internal_deps depends on it so it is refreshed BEFORE the
+# sub-makes compile, not lazily at link time when it would be too late.
 .git_hash_stamp: FORCE
 	@if [ ! -f $@ ] || [ "$$(cat $@)" != "$(GIT_HASH)" ]; then \
 		printf '%s' "$(GIT_HASH)" > $@; \
@@ -275,7 +279,7 @@ $(HIDAPI_W64_DIR)/hid.o: $(HIDAPI_W64_DIR)/src/hid.c
 $(HIDAPI_MACOS_DIR)/hid.o: $(HIDAPI_MACOS_DIR)/src/hid.c
 	$(CC) -MMD -MP -O2 -I$(HIDAPI_MACOS_DIR)/include -c $< -o $@
 
-internal_deps:
+internal_deps: .git_hash_stamp
 	$(MAKE) -C modem
 	$(MAKE) -C datalink_arq
 	$(MAKE) -C datalink_broadcast
@@ -334,8 +338,10 @@ MERCURY_CORE_OBJS = \
 	common/chan.o common/queue.o common/mercury_engine.o common/mercury_cli.o common/mercury_modes.o common/message_store.o \
 	data_interfaces/tcp_interfaces.o data_interfaces/net.o \
 	gui_interface/ui_communication.o gui_interface/ui_status.o gui_interface/ui_devices.o gui_interface/ui_history.o \
-	gui_interface/websocket/mongoose.o gui_interface/websocket/mercury_websocket.o \
-	gui_interface/websocket/web_packed.o \
+	gui_interface/websocket/mercury_websocket.o gui_interface/websocket/ws_server.o \
+	gui_interface/websocket/ws_crypto.o gui_interface/websocket/ws_frame.o \
+	gui_interface/websocket/ws_json.o \
+	gui_interface/websocket/ws_tls.o gui_interface/websocket/web_packed.o \
 	radio_io/radio_io.o radio_io/serial_ptt.o radio_io/cm108_ptt.o $(HIDAPI_OBJS)
 
 ifeq ($(HAVE_HERMES_SHM),1)
@@ -398,9 +404,14 @@ libmercury_core_w64.a: $(HIDAPI_W64_OBJ)
 # mercury_link_linux.go's #cgo directive, because hidapi is OPTIONAL: only this
 # Makefile knows whether pkg-config found it.  Without this, cm108_ptt.o's
 # hid_* references go unresolved on any host that HAS hidapi installed.
+#
+# WS_TLS_LDFLAGS rides along for the same reason: whether the websocket server
+# has an OpenSSL backend is decided by pkg-config in config.mk, so only the
+# Makefile knows whether ws_tls.o carries SSL_* references.  It is empty on
+# Windows and macOS, which build without TLS.
 fyne-ui: libmercury_core.a
 	@echo "Building Mercury UI (native: Linux or macOS)..."
-	cd $(FYNE_UI_DIR) && CGO_ENABLED=1 CGO_LDFLAGS="$(HIDAPI_LDFLAGS)" go build -tags mercury_embedded \
+	cd $(FYNE_UI_DIR) && CGO_ENABLED=1 CGO_LDFLAGS="$(HIDAPI_LDFLAGS) $(WS_TLS_LDFLAGS)" go build -tags mercury_embedded \
 		-ldflags "-X main.coreBuildID=$$(cksum $(abspath libmercury_core.a) | cut -d' ' -f1)" \
 		-o $(abspath mercury-ui) .
 	@echo "  -> mercury-ui"
@@ -508,14 +519,20 @@ fyne-ui-macos-dmg: fyne-ui-macos
 # two binaries are lipo-combined; a single -arch x86_64 -arch arm64 link fails
 # because intermediate ar archives would hold fat members. The vendored fat
 # static hamlib/libusb let ld pick the matching slice for each per-arch link.
+#
+# OpenSSL is deliberately NOT used here (WS_TLS=0): a Homebrew libssl is built
+# for one architecture, so the slice that does not match fails to link, and a
+# universal binary that only builds on half the Macs is worse than one without
+# wss://.  A single-arch `make fyne-ui-macos` still picks up OpenSSL if the
+# system has it.
 
 # Universal, self-contained mercury CLI (pure C).
 macos-universal:
 	@for A in x86_64 arm64; do \
 		echo "== building mercury slice: $$A =="; \
 		$(MAKE) clean >/dev/null; \
-		$(MAKE) internal_deps CC="clang -arch $$A" || exit 1; \
-		$(MAKE) $(BINARY) CC="clang -arch $$A" || exit 1; \
+		$(MAKE) internal_deps CC="clang -arch $$A" WS_TLS=0 || exit 1; \
+		$(MAKE) $(BINARY) CC="clang -arch $$A" WS_TLS=0 || exit 1; \
 		mv $(BINARY) mercury-$$A || exit 1; \
 	done
 	lipo -create mercury-x86_64 mercury-arm64 -output $(BINARY)
@@ -534,7 +551,7 @@ fyne-ui-macos-universal:
 		case $$A in x86_64) GOA=amd64;; arm64) GOA=arm64;; esac; \
 		echo "== building mercury-ui slice: $$A =="; \
 		$(MAKE) clean >/dev/null; \
-		$(MAKE) libmercury_core.a CC="clang -arch $$A" || exit 1; \
+		$(MAKE) libmercury_core.a CC="clang -arch $$A" WS_TLS=0 || exit 1; \
 		( cd $(FYNE_UI_DIR) && CGO_ENABLED=1 GOOS=darwin GOARCH=$$GOA CC="clang -arch $$A" \
 			go build -tags mercury_embedded \
 			-ldflags "-X main.coreBuildID=$$(cksum $(abspath libmercury_core.a) | cut -d' ' -f1)" \

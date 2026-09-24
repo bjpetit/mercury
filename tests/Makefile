@@ -67,7 +67,7 @@ TEST_BINS = test_ring_buffer test_arq_protocol test_arq_timing test_arq_fsm \
             test_mercury_prng test_bcast_file \
             test_ofdm_acq test_ui_status test_ui_devices test_ui_ptt_persist test_tx_pacing test_radio_port \
             test_radio_io_frequency test_mfsk \
-			test_message_store test_ui_history
+			test_message_store test_ui_history test_ws_protocol
 
 .PHONY: all test clean
 
@@ -258,6 +258,23 @@ test_radio_io_frequency: radio_io/test_radio_io_frequency.c $(UNITY_SRC) \
                          ../radio_io/radio_io.c ../common/hermes_log.c
 	$(CC) $(CFLAGS) -U HAVE_HAMLIB -U HAVE_HERMES_SHM -DRADIO_IO_TEST -o $@ $(filter %.c %.a %.o,$^) $(LDFLAGS)
 
+# WebSocket wire format (RFC 6455).  Mercury speaks this protocol with its own
+# code since the vendored GPL-2.0-only library was removed, so the handshake
+# digest and the frame codec are ours to keep correct.  Pure functions only --
+# no sockets, no threads.
+test_ws_protocol: gui_interface/test_ws_protocol.c $(UNITY_SRC) \
+                  ../gui_interface/websocket/ws_crypto.c \
+                  ../gui_interface/websocket/ws_frame.c \
+                  ../gui_interface/websocket/ws_json.c \
+                  ../gui_interface/websocket/ws_crypto.h \
+                  ../gui_interface/websocket/ws_frame.h \
+                  ../gui_interface/websocket/ws_json.h
+	$(CC) $(CFLAGS) -I../gui_interface/websocket -o $@ \
+	    gui_interface/test_ws_protocol.c $(UNITY_SRC) \
+	    ../gui_interface/websocket/ws_crypto.c \
+	    ../gui_interface/websocket/ws_frame.c \
+	    ../gui_interface/websocket/ws_json.c $(LDFLAGS)
+
 # UI status wire format (embedded struct vs remote JSON must not drift)
 # ui_status.h is a PREREQUISITE: the device-id widths under test are #defines
 # in the header, so without it make will not rebuild and the test silently
@@ -281,11 +298,18 @@ test_ui_devices: gui_interface/test_ui_devices.c $(UNITY_SRC) \
 # ui_communication.c and the real INI code are linked; the radio backend, audio,
 # modem, ARQ and websocket are stubbed in the test.  ui_communication.h and
 # cfg_utils.h are PREREQUISITES so a header change relinks the test.
+# -U HAVE_HAMLIB -U HAVE_HERMES_SHM: this suite stubs the radio backend, so it
+# must be independent of the hamlib and shared-memory backends too.  The parent
+# make passes its full CFLAGS (including -DHAVE_HAMLIB / -DHAVE_HERMES_SHM when
+# those are detected) down to the sub-make; without undefining them here,
+# ui_communication.c compiles in its real ui_comm_preload_radio_list() -> hamlib
+# preload_radio_list() call and the link fails on that undefined symbol (this
+# test links no -lhamlib and no rigctl_parse.c).
 test_ui_ptt_persist: gui_interface/test_ui_ptt_persist.c $(UNITY_SRC) \
                      ../gui_interface/ui_communication.c ../common/cfg_utils.c \
                      ../common/iniparser/iniparser.c ../common/iniparser/dictionary.c \
                      ../gui_interface/ui_communication.h ../common/cfg_utils.h
-	$(CC) $(CFLAGS) -I../gui_interface -I../datalink_arq -I../modem -I../modem/freedv \
+	$(CC) $(CFLAGS) -U HAVE_HAMLIB -U HAVE_HERMES_SHM -I../gui_interface -I../datalink_arq -I../modem -I../modem/freedv \
 	    -I../common -I../common/iniparser -I../data_interfaces -I../audioio -I../radio_io -o $@ \
 	    $(filter %.c %.a %.o,$^) $(LDFLAGS) -lm
 

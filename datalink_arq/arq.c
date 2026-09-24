@@ -221,6 +221,7 @@ static void cb_send_tx_frame(int packet_type, int mode,
         .mode        = mode,
         .frame_size  = frame_size,
         .frame_count = g_sess.pending_burst_frames,
+        .join_next   = g_sess.tx_join_next,
     };
     g_sess.pending_burst_frames = 0;
     arq_modem_enqueue(&action);
@@ -1075,6 +1076,18 @@ bool arq_is_link_connected(void)
     bool connected = (g_sess.conn_state == ARQ_CONN_CONNECTED);
     pthread_mutex_unlock(&g_sess_lock);
     return connected;
+}
+
+void arq_discard_stale_rx(void)
+{
+    /* Every FSM dispatch -- so every CONNECTED transition and every delivery
+     * into the buffer -- runs under g_sess_lock.  Holding it across the check
+     * and the clear means a session cannot start in between and have its
+     * first bytes wiped. */
+    pthread_mutex_lock(&g_sess_lock);
+    if (g_sess.conn_state != ARQ_CONN_CONNECTED)
+        clear_buffer(data_rx_buffer_arq);
+    pthread_mutex_unlock(&g_sess_lock);
 }
 
 int arq_queue_data(const uint8_t *data, size_t len)

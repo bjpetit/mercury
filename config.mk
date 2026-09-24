@@ -44,12 +44,13 @@ COMMON_CFLAGS += -MMD -MP
 #
 # -MMD tracks headers, not flags: an object depends on its source and headers
 # only, so changing a compile flag -- here or in the Makefile that compiles it
-# -- leaves every existing object "up to date".  5ea3356 added
-# -DMG_ENABLE_PACKED_FS=1 for mongoose.o together with a generated
+# -- leaves every existing object "up to date".  5ea3356 added a packed-web
+# compile flag for the old vendored web server together with a generated
 # web_packed.o, in a Makefile-only change.  An incremental build of an older
-# tree kept a mongoose.o that still carried mongoose's own mg_unpack/mg_unlist
-# stubs, linked it beside the generated ones, and failed with "multiple
-# definition of `mg_unpack'".
+# tree kept a library object that still carried the library's own stub
+# versions of the unpack hooks, linked it beside the generated ones, and
+# failed with "multiple definition".  The same trap applies to WS_TLS_CFLAGS
+# below: it decides whether ws_tls.o has an OpenSSL backend at all.
 #
 # BUILD_CONFIG is the including Makefile plus this file (MAKEFILE_LIST as it
 # stands here).  Each Makefile makes the objects it compiles depend on it, next
@@ -100,6 +101,51 @@ ATOMIC_LDFLAGS =
 ifneq ($(filter arm%,$(TARGET_MACHINE)),)
 ifeq ($(filter arm64%,$(TARGET_MACHINE)),)
   ATOMIC_LDFLAGS = -latomic
+endif
+ifneq ($(filter m68k%,$(TARGET_MACHINE)),)
+  ATOMIC_LDFLAGS = -latomic
+endif
+endif
+
+# --- Optional TLS (wss://) for the UI web server ---
+#
+# The built-in WebSocket server can serve wss:// through OpenSSL, which is
+# Apache-2.0 and so compatible with Mercury's GPL-3.0-or-later.  Default is to
+# USE IT WHEREVER THE SYSTEM HAS IT -- detected with pkg-config, the same way
+# hamlib and hidapi are.  A build without it still works: the server serves
+# plain ws:// and refuses wss:// at startup with a clear message, rather than
+# failing per connection.
+#
+# Windows is the one exception, and not by preference: that build is a mingw
+# cross-compile, where a bare `pkg-config --exists openssl` answers for the
+# HOST.  Believing it would link an ELF shared library into a PE, so it is
+# skipped unless someone points PKG_CONFIG_LIBDIR at a real mingw OpenSSL and
+# asks for it with WS_TLS=1.
+#
+# That exception is a "not yet", not a "never": the way to give Windows and
+# universal macOS wss:// is to vendor a static OpenSSL the way radio_io already
+# vendors hamlib-w64 and the fat hamlib-macos, and then drop the guard below.
+#
+#   WS_TLS=0   never use OpenSSL
+#   WS_TLS=1   use it if pkg-config finds it (default), Windows included
+WS_TLS ?= 1
+WS_TLS_CFLAGS :=
+WS_TLS_LDFLAGS :=
+
+WS_TLS_CROSS_SAFE := 1
+ifeq ($(OS),Windows_NT)
+ifneq ($(origin WS_TLS),command line)
+  WS_TLS_CROSS_SAFE := 0
+endif
+endif
+
+ifeq ($(WS_TLS),1)
+ifeq ($(WS_TLS_CROSS_SAFE),1)
+  WS_OPENSSL_OK := $(shell pkg-config --exists openssl 2>/dev/null && echo 1)
+  ifeq ($(WS_OPENSSL_OK),1)
+    WS_TLS_CFLAGS := -DWS_HAVE_OPENSSL=1 $(shell pkg-config --cflags openssl)
+    WS_TLS_LDFLAGS := $(shell pkg-config --libs openssl)
+  endif
 endif
 endif
 

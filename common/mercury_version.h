@@ -12,13 +12,13 @@
 /* The release version string.  The Makefile also reads this line
  * (grep 'define MERCURY_VERSION') to name release artifacts, so keep the
  * "..." form on one line. */
-#define MERCURY_VERSION "1.9.14"
+#define MERCURY_VERSION "1.9.15"
 
 /* GIT_HASH is injected by the build via -DGIT_HASH (see config.mk).  It is
  * resolved in the including translation unit, so any unit that is rebuilt when
- * the hash changes — main.o (via .git_hash_stamp) for the daemon, and
- * mercury_bridge.o (recompiled on every libmercury_core.a build) for the UI —
- * shows the current hash. */
+ * the hash changes — main.o and mercury_cli.o (both via .git_hash_stamp, so the
+ * daemon banner and `-V` stay current), and mercury_bridge.o (recompiled on
+ * every libmercury_core.a build) for the UI — shows the current hash. */
 #ifndef GIT_HASH
 #define GIT_HASH "unknown000"
 #endif

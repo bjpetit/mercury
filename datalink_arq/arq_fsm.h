@@ -203,6 +203,11 @@ typedef struct
 
     /* --- Peer state observed from frames --- */
     bool     peer_has_data;            /* peer's HAS_DATA flag in last frame   */
+    bool     peer_cap_more;            /* peer sets/understands HAS_DATA on
+                                        * DATA frames (ARQ_FLAG_CAP_MORE)    */
+    bool     peer_more_data;           /* the peer's last DATA said more is
+                                        * queued behind it                   */
+    uint64_t peer_more_data_ms;        /* when that DATA was received       */
     bool     peer_turn_req_pending;    /* peer asked for the floor while we were
                                         * in WAIT_ACK; honoured when the ACK
                                         * lands, never by keying into it        */
@@ -213,7 +218,28 @@ typedef struct
      * avoid keying a TURN_REQ into the peer's frame. */
     uint64_t last_rx_sync_ms;
     uint8_t  turn_req_defer_count;     /* consecutive busy-channel deferrals   */
+    uint8_t  retx_defer_count;         /* same, for DATA (first burst and
+                                        * WAIT_ACK retransmission)          */
+    uint8_t  disc_defer_count;         /* same, for DISCONNECT              */
+    bool     tx_active;                /* we are keyed (TX_STARTED seen, no
+                                        * TX_COMPLETE yet)                   */
+    uint64_t last_tx_end_ms;           /* when our last transmission ended  */
     bool     acktx_had_has_data;       /* HAS_DATA was set in the last ACK sent */
+    bool     host_released;            /* the application ended this session
+                                        * (DISCONNECT/ABORT): nothing more is
+                                        * delivered to it until a new one.
+                                        * Only APP_DISCONNECT (DISCONNECT,
+                                        * ABORT, control client gone) sets
+                                        * it: it is the one teardown that stays
+                                        * CONNECTED (draining the backlog)
+                                        * after the host is told DISCONNECTED.
+                                        * Peer DISCONNECT, timeouts and LISTEN
+                                        * OFF leave CONNECTED at once, so
+                                        * nothing is delivered after them. */
+    bool     tx_join_next;             /* the frame being sent opens a keydown the
+                                        * NEXT send joins (ACK + first data burst) */
+    bool     ack_carries_data;         /* the ACK over in flight also carries our
+                                        * first data burst (one keydown)        */
     int      peer_snr_x10;            /* peer-reported SNR * 10 (integer)     */
     bool     peer_snr_valid;          /* a peer SNR reading has been received; *
                                        * distinguishes a genuine 0 dB report   *
@@ -239,6 +265,10 @@ typedef struct
                                         * call always returns to where it was   */
 
     /* --- Connect handshake --- */
+    bool     accept_fallback;          /* LISTENING was entered because our ACCEPT
+                                        * retries ran out: the caller may still
+                                        * have heard it, so its first DATA/ACK
+                                        * may complete this session.  Only then. */
     bool     accept_tx_pending;        /* the pending TIMER_RETRY is an ACCEPT
                                         * answering a CALL we actually heard,
                                         * not the RX-window timer.  Only the
@@ -249,6 +279,8 @@ typedef struct
     bool     deferred_listen_off;      /* LISTEN OFF received during grace period;
                                         * will be honoured once the grace expires    */
     bool     pending_disconnect_notify;/* defer notify_disconnected until TX done */
+    bool     pending_disconnect_reply; /* our reply to the peer's DISCONNECT is
+                                        * due when the reply guard expires  */
     bool     pending_disconnect;       /* APP_DISCONNECT deferred until TX buf empty */
     bool     pending_connect;          /* CONNECT arrived while DISCONNECTING: place
                                         * the call once the teardown completes     */
